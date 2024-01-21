@@ -5,16 +5,19 @@ import (
 	"github.com/Vodka479/go-shop-tutorial/modules/entities"
 	"github.com/Vodka479/go-shop-tutorial/modules/users"
 	"github.com/Vodka479/go-shop-tutorial/modules/users/usersUsecases"
+	"github.com/Vodka479/go-shop-tutorial/pkg/goauth"
 	"github.com/gofiber/fiber/v2"
 )
 
 type userHandlersErrCode string
 
 const (
-	SignUpCustomerErr  userHandlersErrCode = "users-001"
-	SignInErr          userHandlersErrCode = "users-002"
-	RefreshPassportErr userHandlersErrCode = "users-003"
-	SignOutErr         userHandlersErrCode = "users-004"
+	SignUpCustomerErr     userHandlersErrCode = "users-001"
+	SignInErr             userHandlersErrCode = "users-002"
+	RefreshPassportErr    userHandlersErrCode = "users-003"
+	SignOutErr            userHandlersErrCode = "users-004"
+	SignUpAdminErr        userHandlersErrCode = "users-005"
+	GenerateAdminTokenErr userHandlersErrCode = "users-006"
 )
 
 type IUsersHandlers interface {
@@ -22,6 +25,8 @@ type IUsersHandlers interface {
 	SignIn(c *fiber.Ctx) error
 	RefreshPassport(c *fiber.Ctx) error
 	SignOut(c *fiber.Ctx) error
+	SignUpAdmin(c *fiber.Ctx) error
+	GenerateAdminToken(c *fiber.Ctx) error
 }
 
 type usersHandler struct {
@@ -81,6 +86,53 @@ func (h *usersHandler) SignUpCustomer(c *fiber.Ctx) error {
 		}
 	}
 
+	return entities.NewResponse(c).Success(fiber.StatusCreated, result).Res()
+}
+
+func (h *usersHandler) SignUpAdmin(c *fiber.Ctx) error {
+	// Request body parser
+	req := new(users.UserRegisterReq)
+	if err := c.BodyParser(req); err != nil {
+		return entities.NewResponse(c).Error(
+			fiber.ErrBadRequest.Code,
+			string(SignUpAdminErr),
+			err.Error(),
+		).Res()
+	}
+
+	// Email validation
+	if !req.IsEmail() {
+		return entities.NewResponse(c).Error(
+			fiber.ErrBadRequest.Code,
+			string(SignUpAdminErr),
+			"email pattern is invalid",
+		).Res()
+	}
+
+	// Insert
+	result, err := h.usersUsecase.InsertCustomer(req)
+	if err != nil {
+		switch err.Error() {
+		case "username has been used":
+			return entities.NewResponse(c).Error(
+				fiber.ErrBadRequest.Code,
+				string(SignUpAdminErr),
+				err.Error(),
+			).Res()
+		case "email has been used":
+			return entities.NewResponse(c).Error(
+				fiber.ErrBadRequest.Code,
+				string(SignUpCustomerErr),
+				err.Error(),
+			).Res()
+		default:
+			return entities.NewResponse(c).Error(
+				fiber.ErrInternalServerError.Code,
+				string(SignUpAdminErr),
+				err.Error(),
+			).Res()
+		}
+	}
 	return entities.NewResponse(c).Success(fiber.StatusCreated, result).Res()
 }
 
@@ -147,4 +199,28 @@ func (h *usersHandler) SignOut(c *fiber.Ctx) error {
 	}
 
 	return entities.NewResponse(c).Success(fiber.StatusOK, nil).Res()
+}
+
+func (h *usersHandler) GenerateAdminToken(c *fiber.Ctx) error {
+	adminToken, err := goauth.NewGoAuth(
+		goauth.Admin,
+		h.cfg.Jwt(),
+		nil,
+	)
+	if err != nil {
+		return entities.NewResponse(c).Error(
+			fiber.ErrInternalServerError.Code,
+			string(GenerateAdminTokenErr),
+			err.Error(),
+		).Res()
+	}
+
+	return entities.NewResponse(c).Success(
+		fiber.StatusOK,
+		&struct {
+			Token string `json:"token"`
+		}{
+			Token: adminToken.SignToken(),
+		},
+	).Res()
 }
